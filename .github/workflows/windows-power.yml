@@ -1,95 +1,63 @@
-```yaml
-name: Windows Power Runner
+name: Windows Power Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  power:
-    # TROQUE pelo label do seu Larger Runner Windows.
-    # Exemplo: windows-96core
-    runs-on:
-      - windows-96core
-
-    timeout-minutes: 30
+  power-test:
+    runs-on: windows-latest
 
     steps:
-      - name: Informações da máquina
+      - name: Mostrar hardware
         shell: powershell
         run: |
-          Write-Host "======================================"
-          Write-Host "       WINDOWS POWER RUNNER"
-          Write-Host "======================================"
+          Write-Host "===== WINDOWS ====="
+          Get-ComputerInfo |
+            Select-Object WindowsProductName, WindowsVersion, OsArchitecture
 
-          Write-Host "`n--- CPU ---"
+          Write-Host "`n===== CPU ====="
           Get-CimInstance Win32_Processor |
-            Select-Object Name,
-              NumberOfCores,
-              NumberOfLogicalProcessors
+            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
 
-          Write-Host "`n--- RAM ---"
+          Write-Host "`n===== RAM ====="
           $ram = Get-CimInstance Win32_ComputerSystem
-          Write-Host ("RAM: {0:N2} GB" -f ($ram.TotalPhysicalMemory / 1GB))
+          Write-Host ("{0:N2} GB" -f ($ram.TotalPhysicalMemory / 1GB))
 
-          Write-Host "`n--- DISCO ---"
+          Write-Host "`n===== DISCO ====="
           Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" |
             Select-Object DeviceID,
-              @{N="TotalGB";E={[math]::Round($_.Size/1GB,2)}},
-              @{N="FreeGB";E={[math]::Round($_.FreeSpace/1GB,2)}}
+              @{Name="TotalGB";Expression={[math]::Round($_.Size / 1GB, 2)}},
+              @{Name="LivreGB";Expression={[math]::Round($_.FreeSpace / 1GB, 2)}}
 
-          Write-Host "`n--- WINDOWS ---"
-          Get-ComputerInfo |
-            Select-Object WindowsProductName,
-              WindowsVersion,
-              OsArchitecture
-
-      - name: Testar desempenho
+      - name: Teste de CPU
         shell: powershell
         run: |
-          Write-Host "Executando teste de CPU..."
+          $cores = [Environment]::ProcessorCount
 
-          $sw = [Diagnostics.Stopwatch]::StartNew()
+          Write-Host "Threads disponíveis: $cores"
 
-          $jobs = 1..([Environment]::ProcessorCount) | ForEach-Object {
-              Start-Job {
-                  $x = 0
-                  for ($i = 0; $i -lt 10000000; $i++) {
-                      $x += $i
-                  }
-                  return $x
+          $jobs = @()
+
+          for ($i = 0; $i -lt $cores; $i++) {
+            $jobs += Start-Job {
+              $total = 0
+              for ($n = 0; $n -lt 5000000; $n++) {
+                $total += $n
               }
+              $total
+            }
           }
 
           $jobs | Wait-Job | Out-Null
           $jobs | Receive-Job | Out-Null
           $jobs | Remove-Job
 
-          $sw.Stop()
+          Write-Host "Teste concluído."
 
-          Write-Host ""
-          Write-Host "CPU logica detectada:"
-          Write-Host ([Environment]::ProcessorCount)
-
-          Write-Host "Tempo do teste:"
-          Write-Host $sw.Elapsed
-
-      - name: Verificar Hyper-V
-        shell: powershell
-        run: |
-          Write-Host "=== HYPER-V ==="
-
-          Get-WindowsOptionalFeature `
-            -Online `
-            -FeatureName Microsoft-Hyper-V-All `
-            -ErrorAction SilentlyContinue |
-            Select-Object FeatureName, State
-
-      - name: Resultado
+      - name: Final
         shell: powershell
         run: |
           Write-Host ""
-          Write-Host "======================================"
-          Write-Host " RUNNER FUNCIONANDO"
-          Write-Host "======================================"
-```
-
+          Write-Host "================================"
+          Write-Host "   WINDOWS POWER TEST OK"
+          Write-Host "================================"
