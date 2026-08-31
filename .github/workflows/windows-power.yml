@@ -1,50 +1,53 @@
-name: Windows Power Test
+name: Windows Hardware Benchmark
 
 on:
   workflow_dispatch:
 
 jobs:
-  power-test:
+  benchmark:
     runs-on: windows-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Mostrar hardware
+      - name: Hardware
         shell: powershell
         run: |
-          Write-Host "===== WINDOWS ====="
+          Write-Host "=== SISTEMA ==="
           Get-ComputerInfo |
             Select-Object WindowsProductName, WindowsVersion, OsArchitecture
 
-          Write-Host "`n===== CPU ====="
+          Write-Host "`n=== CPU ==="
           Get-CimInstance Win32_Processor |
-            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
+            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors,
+              MaxClockSpeed
 
-          Write-Host "`n===== RAM ====="
+          Write-Host "`n=== RAM ==="
           $ram = Get-CimInstance Win32_ComputerSystem
-          Write-Host ("{0:N2} GB" -f ($ram.TotalPhysicalMemory / 1GB))
+          "{0:N2} GB" -f ($ram.TotalPhysicalMemory / 1GB)
 
-          Write-Host "`n===== DISCO ====="
+          Write-Host "`n=== DISCO ==="
           Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" |
             Select-Object DeviceID,
-              @{Name="TotalGB";Expression={[math]::Round($_.Size / 1GB, 2)}},
-              @{Name="LivreGB";Expression={[math]::Round($_.FreeSpace / 1GB, 2)}}
+              @{N="TotalGB";E={[math]::Round($_.Size/1GB,2)}},
+              @{N="LivreGB";E={[math]::Round($_.FreeSpace/1GB,2)}}
 
-      - name: Teste de CPU
+      - name: CPU Benchmark
         shell: powershell
         run: |
+          Write-Host "=== CPU BENCHMARK ==="
+
           $cores = [Environment]::ProcessorCount
-
-          Write-Host "Threads disponíveis: $cores"
-
           $jobs = @()
+
+          $timer = [Diagnostics.Stopwatch]::StartNew()
 
           for ($i = 0; $i -lt $cores; $i++) {
             $jobs += Start-Job {
-              $total = 0
-              for ($n = 0; $n -lt 5000000; $n++) {
-                $total += $n
+              $x = 0
+              for ($n = 1; $n -le 20000000; $n++) {
+                $x += [math]::Sqrt($n)
               }
-              $total
+              $x
             }
           }
 
@@ -52,12 +55,48 @@ jobs:
           $jobs | Receive-Job | Out-Null
           $jobs | Remove-Job
 
-          Write-Host "Teste concluído."
+          $timer.Stop()
 
-      - name: Final
+          Write-Host "Threads: $cores"
+          Write-Host "Tempo: $($timer.Elapsed.TotalSeconds) segundos"
+
+      - name: Disco Benchmark
+        shell: powershell
+        run: |
+          Write-Host "=== DISCO BENCHMARK ==="
+
+          $file = "$env:TEMP\disk-test.bin"
+
+          $timer = [Diagnostics.Stopwatch]::StartNew()
+
+          fsutil file createnew $file 1073741824 | Out-Null
+
+          $timer.Stop()
+
+          $size = 1GB
+          $seconds = $timer.Elapsed.TotalSeconds
+          $speed = $size / $seconds / 1MB
+
+          Write-Host "Arquivo: 1 GB"
+          Write-Host "Tempo: $seconds segundos"
+          Write-Host ("Velocidade aproximada: {0:N2} MB/s" -f $speed)
+
+          Remove-Item $file -Force
+
+      - name: Virtualização
+        shell: powershell
+        run: |
+          Write-Host "=== VIRTUALIZAÇÃO ==="
+
+          systeminfo | Select-String `
+            "Hyper-V Requirements",
+            "Virtualization",
+            "VM Monitor"
+
+      - name: Resultado
         shell: powershell
         run: |
           Write-Host ""
-          Write-Host "================================"
-          Write-Host "   WINDOWS POWER TEST OK"
-          Write-Host "================================"
+          Write-Host "===================================="
+          Write-Host "       BENCHMARK FINALIZADO"
+          Write-Host "===================================="
